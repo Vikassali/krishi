@@ -1,11 +1,17 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import re
+import joblib
+import numpy as np
 
 app = Flask(__name__)
 CORS(app)
 
-# 1. 100+ Crop Prices Data
+# --- Load your trained ML model ---
+MODEL_PATH = 'crop_price_model.pkl'
+model = joblib.load(MODEL_PATH)
+
+# 1. Vegetable Prices Data (English, Kannada, Hindi)
 VEGETABLE_PRICES = {
     "tomato": 35, "potato": 28, "onion": 40, "carrot": 50, "rice": 60, "wheat": 55, "maize": 45,
     "cabbage": 30, "cauliflower": 38, "spinach": 25, "cucumber": 22, "bell pepper": 70, "green peas": 80,
@@ -27,61 +33,69 @@ VEGETABLE_PRICES = {
     "wasabi": 1500
 }
 
-# 2. Crop Name Translations (100+ for Kannada and Hindi, mapped to English)
+# 2. Crop Name Translations (English <-> Kannada <-> Hindi)
 CROP_TRANSLATIONS = {
     "kannada": {
         "ಟೊಮೇಟೊ": "tomato", "ಆಲೂಗಡ್ಡೆ": "potato", "ಈರುಳ್ಳಿ": "onion", "ಕ್ಯಾರೆಟ್": "carrot",
-        "ಅಕ್ಕಿ": "rice", "ಗೋಧಿ": "wheat", "ಮೆಕ್ಕೆಜೋಳ": "maize", "ಎಲೆಕೋಸು": "cabbage", "ಹೂಕೋಸು": "cauliflower",
-        "ಪಾಲಕ್": "spinach", "ಸೌತೆಕಾಯಿ": "cucumber", "ದೊಣ್ಣೆ ಮೆಣಸು": "bell pepper", "ಹಸಿರು ಬಟಾಣಿ": "green peas",
-        "ಹುರಳಿಕಾಯಿ": "beans", "ಬದನೆಕಾಯಿ": "eggplant", "ಬೆಳ್ಳುಳ್ಳಿ": "garlic", "ಶುಂಠಿ": "ginger",
-        "ಮೆಣಸು": "chili", "ಕುಂಬಳಕಾಯಿ": "pumpkin", "ಸಿಹಿ ಆಲೂಗಡ್ಡೆ": "sweet potato", "ಮೂಲಂಗಿ": "radish",
-        "ಹೆಸರು": "lettuce", "ಜೋಳ": "corn", "ಹಾಗಲಕಾಯಿ": "bitter gourd", "ಬೆಂಡೆಕಾಯಿ": "okra",
-        "ಬ್ರಿಂಜಲ್": "brinjal", "ಸಾಸಿವೆ ಸೊಪ್ಪು": "mustard greens", "ಮೆಂತ್ಯೆ": "fenugreek", "ಕೊತ್ತಂಬರಿ": "coriander",
-        "ಪುದೀನಾ": "mint", "ನಿಂಬೆ": "lemon", "ಬಾಳೆಹಣ್ಣು": "banana", "ಸೇಬು": "apple", "ಕಿತ್ತಳೆ": "orange",
-        "ದ್ರಾಕ್ಷಿ": "grapes", "ಮಾವು": "mango", "ದಾಳಿಂಬೆ": "pomegranate", "ಕಲ್ಲಂಗಡಿ": "watermelon",
-        "ಪಪ್ಪಾಯಿ": "papaya", "ಅನಾನಸ್": "pineapple", "ಪೇರಲೆ": "guava", "ನಾಶ್ಪತಿ": "pear", "ಚೆರಿ": "cherry",
-        "ಸ್ಟ್ರಾಬೆರಿ": "strawberry", "ಬ್ಲ್ಯಾಕ್ಬೆರಿ": "blackberry", "ಬ್ಲೂಬೆರಿ": "blueberry", "ತೆಂಗಿನಕಾಯಿ": "coconut",
-        "ಗೋಡಂಬಿ": "cashew nut", "ಬಾದಾಮಿ": "almond", "ಅಕಹೋಡು": "walnut", "ಶೇಂಗಾ": "peanut", "ಎಳ್ಳು": "sesame",
-        "ಸೂರ್ಯಕಾಂತಿ ಬೀಜ": "sunflower seed", "ಸೋಯಾಬೀನ್": "soybean", "ಹೆಸರುಕಾಳು": "lentil", "ಕಡಲೆ": "chickpea",
-        "ರಾಜ್ಮಾ": "kidney bean", "ಉದ್ದಿನಕಾಳು": "black gram", "ಹೆಸರುಕಾಳು": "green gram", "ಸಾಸಿವೆ": "mustard seed",
-        "ಶರಕರಿ": "sugarcane", "ಚಹಾ ಎಲೆ": "tea leaves", "ಕಾಫಿ ಬೀಜ": "coffee beans", "ಹತ್ತಿ": "cotton",
-        "ಜ್ಯೂಟ್": "jute", "ಧೂಮಪಾನ": "tobacco", "ಅರಿಶಿನ": "turmeric", "ಜೀರಿಗೆ": "cumin", "ಏಲಕ್ಕಿ": "cardamom",
-        "ಲವಂಗ": "clove", "ಕಪ್ಪು ಮೆಣಸು": "black pepper", "ವನಿಲ್ಲಾ": "vanilla", "ತುಳಸಿ": "basil", "ಓರೆಗಾನೋ": "oregano",
-        "ತೈಮ್": "thyme", "ರೋಸ್‌ಮೇರಿ": "rosemary", "ಸೇಜ್": "sage", "ಅಸ್ಪಾರಾಗಸ್": "asparagus", "ಆರ್ಟಿಚೋಕ್": "artichoke",
-        "ಅರುಗುಲಾ": "arugula", "ಬೀಟ್ರೂಟ್": "beetroot", "ಬೋಕ್ ಚೋಯ್": "bok choy", "ಬ್ರೊಕೊಲಿ": "broccoli",
-        "ಬ್ರಸ್ಸೆಲ್ಸ್ ಸ್ಪ್ರೌಟ್": "brussels sprouts", "ಕೇಲ್": "kale", "ಕಾಲರ್ಡ್ ಗ್ರೀನ್ಸ್": "collard greens",
-        "ಎಂಡೈವ್": "endive", "ಸೋಂಪು": "fennel", "ಕೋಲ್ರಾಬಿ": "kohlrabi", "ಲೀಕ್": "leek", "ಪಾರ್ಸ್ನಿಪ್": "parsnip",
-        "ರೂಟಬಾಗಾ": "rutabaga", "ಶಲ್ಲೋಟ್": "shallot", "ಸ್ವಿಸ್ ಚಾರ್ಡ್": "swiss chard", "ಟರ್ನಿಪ್": "turnip",
-        "ಜುಕ್ಕಿನಿ": "zucchini", "ರಾಟು": "yam", "ಕಸ್ಸಾವಾ": "cassava", "ಜಿಕಾಮಾ": "jicama", "ನೀರು ಕಸ್ತೂರಿ": "water chestnut",
-        "ತಾವರೆ ಬೇರು": "lotus root", "ಎಡಮಾಮೆ": "edamame", "ಚಯೋಟೆ": "chayote", "ಸೆಲರಿ": "celery",
-        "ಸೆಲ್ಟ್ಯೂಸ್": "celtuce", "ಡೈಕಾನ್": "daikon", "ದಾಂಡೇಲಿಯನ್ ಗ್ರೀನ್ಸ್": "dandelion greens",
-        "ಹೋರ್ಸ್ರ್ಯಾಡಿಷ್": "horseradish", "ವಸಾಬಿ": "wasabi"
+        "ಅಕ್ಕಿ": "rice", "ಗೋಧಿ": "wheat", "ಮಕ್ಕಜೋಳ": "maize", "ಹುಲ್ಲು": "spinach",
+        "ಸೌತೆಕಾಯಿ": "cucumber", "ಬೆಲ್ ಪೆಪ್ಪರ್": "bell pepper", "ಹಸಿರು ಬಟಾಣಿ": "green peas",
+        "ಹುರುಳಿಕಾಯಿ": "beans", "ಬದನೆಕಾಯಿ": "eggplant", "ಬೆಳ್ಳುಳ್ಳಿ": "garlic", "ಶುಂಠಿ": "ginger",
+        "ಮೆಣಸು": "chili", "ಕುಂಬಳಕಾಯಿ": "pumpkin", "ಸಿಹಿ ಆಲೂಗಡ್ಡೆ": "sweet potato",
+        "ಮೂಲಂಗಿ": "radish", "ಹುಳಿವಳ್ಳಿ": "lettuce", "ಜೋಳ": "corn", "ಹಾಗಲಕಾಯಿ": "bitter gourd",
+        "ಬೆಂಡೆಕಾಯಿ": "okra", "ಬ್ರಿಂಜಲ್": "brinjal", "ಸಾಸಿವೆ ಸೊಪ್ಪು": "mustard greens",
+        "ಮೆಂತ್ಯೆ": "fenugreek", "ಕೊತ್ತಂಬರಿ": "coriander", "ಪುದೀನಾ": "mint", "ನಿಂಬೆ": "lemon",
+        "ಬಾಳೆಹಣ್ಣು": "banana", "ಸೇಬು": "apple", "ಕಿತ್ತಳೆ": "orange", "ದ್ರಾಕ್ಷಿ": "grapes",
+        "ಮಾವು": "mango", "ದಾಳಿಂಬೆ": "pomegranate", "ಕಲ್ಲಂಗಡಿ": "watermelon", "ಪಪಾಯಿ": "papaya",
+        "ಅನಾನಸ್": "pineapple", "ಪೇರಲೆ": "guava", "ನಾಶ್ಪತಿ": "pear", "ಚೆರ್ರಿ": "cherry",
+        "ಸ್ಟ್ರಾಬೆರಿ": "strawberry", "ಬ್ಲ್ಯಾಕ್ಬೆರಿ": "blackberry", "ನೀಲಿ ಹಣ್ಣು": "blueberry",
+        "ತೆಂಗಿನಕಾಯಿ": "coconut", "ಗೋಡಂಬಿ": "cashew nut", "ಬಾದಾಮಿ": "almond", "ಅಕ್ರೋಟ್": "walnut",
+        "ಶೆಂಗಾ": "peanut", "ಎಳ್ಳು": "sesame", "ಸೂರ್ಯಕಾಂತಿ ಬೀಜ": "sunflower seed",
+        "ಸೊಯಾಬೀನ್": "soybean", "ಹುರಳಿಕಾಳು": "lentil", "ಕಡಲೆ": "chickpea", "ಅಲಸು": "kidney bean",
+        "ಉದ್ದಿನಕಾಳು": "black gram", "ಹೆಸರುಕಾಳು": "green gram", "ಸಾಸಿವೆ": "mustard seed",
+        "ಶುಗರಕೇನ್": "sugarcane", "ಚಹಾ ಎಲೆ": "tea leaves", "ಕಾಫಿ ಬೀಜ": "coffee beans",
+        "ಹತ್ತಿ": "cotton", "ಜ್ಯೂಟ್": "jute", "ಧೂಮಪಾನ": "tobacco", "ಅರಿಶಿಣ": "turmeric",
+        "ಜೀರಿಗೆ": "cumin", "ಏಲಕ್ಕಿ": "cardamom", "ಲವಂಗ": "clove", "ಮೆಣಸು": "black pepper",
+        "ವ್ಯಾನಿಲ್ಲಾ": "vanilla", "ತಳಸೊಪ್ಪು": "basil", "ಓರೆಗಾನೋ": "oregano", "ಥೈಮ್": "thyme",
+        "ರೋಸ್ಮೆರೀ": "rosemary", "ಸೇಜ್": "sage", "ಅಸ್ಪಾರಾಗಸ್": "asparagus", "ಆರ್ಟಿಚೋಕ್": "artichoke",
+        "ಅರುಗುಲಾ": "arugula", "ಬೀಟ್ರೂಟ್": "beetroot", "ಬೋಕ್ ಚೋಯ್": "bok choy", "ಬ್ರೋಕೊಲಿ": "broccoli",
+        "ಬ್ರಸೆಲ್ಸ್ ಸ್ಪ್ರೌಟ್ಸ್": "brussels sprouts", "ಕೇಲ್": "kale", "ಕಾಲರ್ಡ್ ಗ್ರೀನ್ಸ್": "collard greens",
+        "ಎಂಡೈವ್": "endive", "ಸೋಂಪು": "fennel", "ಕೊಲ್ರಾಬಿ": "kohlrabi", "ಲೀಕ್": "leek",
+        "ಪಾರ್ಸ್ನಿಪ್": "parsnip", "ರೂಟಬಾಗಾ": "rutabaga", "ಶಲ್ಲೋಟ್": "shallot",
+        "ಸ್ವಿಸ್ ಚಾರ್ಡ್": "swiss chard", "ಟರ್ನಿಪ್": "turnip", "ಜುಕ್ಕಿನಿ": "zucchini", "ರತ್ತಾಳು": "yam",
+        "ಮರಗೆಣಸು": "cassava", "ಜಿಕಾಮಾ": "jicama", "ನೀರು ಅಲಸು": "water chestnut",
+        "ತಾಮರ ಹಣ್ಣು": "lotus root", "ಎಡಾಮಾಮೆ": "edamame", "ಚಯೋಟೆ": "chayote", "ಸೆಲರಿ": "celery",
+        "ಸೆಲ್ಟ್ಯೂಸ್": "celtuce", "ಡೈಕಾನ್": "daikon", "ಡಾಂಡಲಿಯನ್ ಸೊಪ್ಪು": "dandelion greens",
+        "ಹಾರ್ಸ್ರಾಡಿಷ್": "horseradish", "ವಸಾಬಿ": "wasabi"
     },
     "hindi": {
-        "टमाटर": "tomato", "आलू": "potato", "प्याज": "onion", "गाजर": "carrot", "चावल": "rice", "गेहूं": "wheat",
-        "मक्का": "maize", "पत्ता गोभी": "cabbage", "फूलगोभी": "cauliflower", "पालक": "spinach", "खीरा": "cucumber",
-        "शिमला मिर्च": "bell pepper", "मटर": "green peas", "फली": "beans", "बैंगन": "eggplant", "लहसुन": "garlic",
-        "अदरक": "ginger", "मिर्च": "chili", "कद्दू": "pumpkin", "शकरकंद": "sweet potato", "मूली": "radish",
-        "सलाद पत्ता": "lettuce", "मक्का": "corn", "करेला": "bitter gourd", "भिंडी": "okra", "ब्रिंजल": "brinjal",
-        "सरसों का साग": "mustard greens", "मेथी": "fenugreek", "धनिया": "coriander", "पुदीना": "mint", "नींबू": "lemon",
-        "केला": "banana", "सेब": "apple", "संतरा": "orange", "अंगूर": "grapes", "आम": "mango", "अनार": "pomegranate",
-        "तरबूज": "watermelon", "पपीता": "papaya", "अनानास": "pineapple", "अमरूद": "guava", "नाशपाती": "pear",
+        "टमाटर": "tomato", "आलू": "potato", "प्याज": "onion", "गाजर": "carrot",
+        "चावल": "rice", "गेहूं": "wheat", "मक्का": "maize", "पालक": "spinach",
+        "खीरा": "cucumber", "शिमला मिर्च": "bell pepper", "हरी मटर": "green peas",
+        "फली": "beans", "बैंगन": "eggplant", "लहसुन": "garlic", "अदरक": "ginger",
+        "मिर्च": "chili", "कद्दू": "pumpkin", "शकरकंद": "sweet potato", "मूली": "radish",
+        "सलाद": "lettuce", "मक्का": "corn", "करेला": "bitter gourd", "भिंडी": "okra",
+        "बैंगन": "brinjal", "सरसों": "mustard greens", "मेथी": "fenugreek", "धनिया": "coriander",
+        "पुदीना": "mint", "नींबू": "lemon", "केला": "banana", "सेब": "apple", "संतरा": "orange",
+        "अंगूर": "grapes", "आम": "mango", "अनार": "pomegranate", "तरबूज": "watermelon",
+        "पपीता": "papaya", "अनानास": "pineapple", "अमरूद": "guava", "नाशपाती": "pear",
         "चेरी": "cherry", "स्ट्रॉबेरी": "strawberry", "ब्लैकबेरी": "blackberry", "ब्लूबेरी": "blueberry",
-        "नारियल": "coconut", "काजू": "cashew nut", "बादाम": "almond", "अखरोट": "walnut", "मूंगफली": "peanut",
-        "तिल": "sesame", "सूरजमुखी बीज": "sunflower seed", "सोयाबीन": "soybean", "मसूर": "lentil", "चना": "chickpea",
-        "राजमा": "kidney bean", "काला चना": "black gram", "हरा चना": "green gram", "सरसों": "mustard seed",
-        "गन्ना": "sugarcane", "चाय पत्ती": "tea leaves", "कॉफी बीन्स": "coffee beans", "कपास": "cotton",
-        "जूट": "jute", "तम्बाकू": "tobacco", "हल्दी": "turmeric", "जीरा": "cumin", "इलायची": "cardamom",
-        "लौंग": "clove", "काली मिर्च": "black pepper", "वनीला": "vanilla", "तुलसी": "basil", "ओरिगैनो": "oregano",
-        "थाइम": "thyme", "रोsemary": "rosemary", "सेज": "sage", "एस्पैरेगस": "asparagus", "आर्टिचोक": "artichoke",
-        "अरुगुला": "arugula", "चुकंदर": "beetroot", "बोक चॉय": "bok choy", "ब्रोकली": "broccoli",
-        "ब्रसेल्स स्प्राउट्स": "brussels sprouts", "केल": "kale", "कोलार्ड ग्रीन्स": "collard greens",
-        "एंडिव": "endive", "सौंफ": "fennel", "कोहलाबी": "kohlrabi", "लीक": "leek", "पार्सनिप": "parsnip",
-        "रutabaga": "rutabaga", "शलोट": "shallot", "स्विस चार्ड": "swiss chard", "शलजम": "turnip",
-        "जुकिनी": "zucchini", "शकरकंद": "yam", "कसावा": "cassava", "जिकामा": "jicama", "सिंघाड़ा": "water chestnut",
-        "कमल ककड़ी": "lotus root", "एडामेमे": "edamame", "चायोट": "chayote", "अजवाइन": "celery",
-        "सेल्ट्यूज": "celtuce", "डाइकॉन": "daikon", "डंडेलियन ग्रीन्स": "dandelion greens",
-        "हॉर्सरैडिश": "horseradish", "वसाबी": "wasabi"
+        "नारियल": "coconut", "काजू": "cashew nut", "बादाम": "almond", "अखरोट": "walnut",
+        "मूंगफली": "peanut", "तिल": "sesame", "सूरजमुखी बीज": "sunflower seed", "सोयाबीन": "soybean",
+        "मसूर": "lentil", "चना": "chickpea", "राजमा": "kidney bean", "उड़द": "black gram",
+        "मूंग": "green gram", "सरसों": "mustard seed", "गन्ना": "sugarcane", "चाय पत्ती": "tea leaves",
+        "कॉफी बीन्स": "coffee beans", "कपास": "cotton", "जूट": "jute", "तंबाकू": "tobacco",
+        "हल्दी": "turmeric", "जीरा": "cumin", "इलायची": "cardamom", "लौंग": "clove",
+        "काली मिर्च": "black pepper", "वनीला": "vanilla", "तुलसी": "basil", "ओरिगैनो": "oregano",
+        "थाइम": "thyme", "रोसमेरी": "rosemary", "सेज": "sage", "एस्पैरेगस": "asparagus",
+        "आर्टिचोक": "artichoke", "अरुगुला": "arugula", "चुकंदर": "beetroot", "बोक चॉय": "bok choy",
+        "ब्रोकोली": "broccoli", "ब्रसेल्स स्प्राउट्स": "brussels sprouts", "केल": "kale",
+        "कोलार्ड ग्रीन्स": "collard greens", "एंडिव": "endive", "सौंफ": "fennel",
+        "कोलरबी": "kohlrabi", "लीक": "leek", "पार्सनिप": "parsnip", "रutabaga": "rutabaga",
+        "शलगम": "turnip", "जुकिनी": "zucchini", "शकरकंद": "yam", "कसावा": "cassava",
+        "जिकामा": "jicama", "पानीफल": "water chestnut", "कमल ककड़ी": "lotus root",
+        "एडामामे": "edamame", "चायोटे": "chayote", "अजवाइन": "celery", "सेल्ट्यूस": "celtuce",
+        "डाइकॉन": "daikon", "डंडेलियन ग्रीन्स": "dandelion greens", "हॉर्सरैडिश": "horseradish",
+        "वसाबी": "wasabi"
     }
 }
 
@@ -89,9 +103,9 @@ CROP_TRANSLATIONS = {
 def get_price_reply(user_message, language):
     msg = user_message.lower()
     price_patterns = [
-        r"\bprice\b", r"\brate\b", r"\bcost\b", r"\bmarket price\b",      # English
-        r"\bಬೆಲೆ\b", r"\bದರ\b", r"\bಮಾರುಕಟ್ಟೆ ಬೆಲೆ\b",                      # Kannada
-        r"\bकीमत\b", r"\bभाव\b", r"\bमूल्य\b", r"\bबाज़ार भाव\b"          # Hindi
+        r"\bprice\b", r"\brate\b", r"\bcost\b", r"\bmarket price\b",
+        r"\bಬೆಲೆ\b", r"\bದರ\b", r"\bಮಾರುಕಟ್ಟೆ ಬೆಲೆ\b",
+        r"\bकीमत\b", r"\bभाव\b", r"\bमूल्य\b", r"\bबाज़ार भाव\b"
     ]
     price_regex = "|".join(price_patterns)
     if re.search(price_regex, msg):
@@ -123,20 +137,72 @@ def get_price_reply(user_message, language):
         }.get(language, "Please specify the crop or vegetable you want the price for.")
     return None
 
-# 4. Greetings and Help in All Languages
-def get_greeting_reply(language):
-    return {
-        "english": "Hello! How can I assist you today?",
-        "kannada": "ಹಲೋ! ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?",
-        "hindi": "नमस्ते! मैं आपकी किस प्रकार सहायता कर सकता हूँ?"
-    }.get(language, "Hello! How can I assist you today?")
-
-def get_help_reply(language):
-    return {
+# 4. Basic Questions and Small Talk Patterns
+BASIC_PATTERNS_RESPONSES = [
+    (r"\bhow are you\b|\bhow do you do\b", {
+        "english": "I'm just a bot, but I'm doing great! How can I help you today?",
+        "hindi": "मैं एक बॉट हूँ, लेकिन मैं ठीक हूँ! मैं आपकी कैसे मदद कर सकता हूँ?",
+        "kannada": "ನಾನು ಬಾಟ್ ಆಗಿದ್ದೇನೆ, ಆದರೆ ನಾನು ಚೆನ್ನಾಗಿದ್ದೇನೆ! ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?"
+    }),
+    (r"\bwhat('?s| is) your name\b", {
+        "english": "I'm your Agri Assistant Bot.",
+        "hindi": "मेरा नाम एग्री असिस्टेंट बॉट है।",
+        "kannada": "ನನ್ನ ಹೆಸರು ಕೃಷಿ ಸಹಾಯಕರ ಬಾಟ್."
+    }),
+    (r"\bwho (created|made|developed) you\b", {
+        "english": "I was created by a team of developers to help you with crop prices and information.",
+        "hindi": "मुझे डेवलपर्स की एक टीम ने आपकी सहायता के लिए बनाया है।",
+        "kannada": "ನನ್ನನ್ನು ಅಭಿವೃದ್ಧಿಪಡಿಸಿದವರು ಅಭಿವೃದ್ಧಿಕರ್ತರ ತಂಡ."
+    }),
+    (r"\bthank(s| you)\b|\bthanks a lot\b", {
+        "english": "You're welcome! Let me know if you have more questions.",
+        "hindi": "आपका स्वागत है! अगर आपके पास और सवाल हैं तो बताएं।",
+        "kannada": "ನಿಮಗೆ ಧನ್ಯವಾದಗಳು! ನಿಮಗೆ ಇನ್ನಷ್ಟು ಪ್ರಶ್ನೆಗಳಿದ್ದರೆ ಕೇಳಿ."
+    }),
+    (r"\bgoodbye\b|\bbye\b|\bsee you\b", {
+        "english": "Goodbye! Have a great day!",
+        "hindi": "अलविदा! आपका दिन शुभ हो!",
+        "kannada": "ವಿದಾಯ! ನಿಮ್ಮ ದಿನ ಶುಭವಾಗಿರಲಿ!"
+    }),
+    (r"\bwhat('?s| is) the weather\b|\bweather today\b", {
+        "english": "I can't provide live weather updates yet, but I can help with crop prices.",
+        "hindi": "मैं अभी मौसम की जानकारी नहीं दे सकता, लेकिन फसल के दाम बता सकता हूँ।",
+        "kannada": "ನಾನು ಹವಾಮಾನ ಮಾಹಿತಿ ನೀಡಲು ಸಾಧ್ಯವಿಲ್ಲ, ಆದರೆ ಬೆಲೆ ಮಾಹಿತಿ ನೀಡಬಹುದು."
+    }),
+    (r"\bhelp\b|\bassistance\b|\bsupport\b", {
         "english": "Sure, I can help you. Please tell me your question.",
-        "kannada": "ಖಚಿತವಾಗಿ, ನಾನು ನಿಮಗೆ ಸಹಾಯ ಮಾಡಬಹುದು. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಹೇಳಿ.",
-        "hindi": "ज़रूर, मैं आपकी सहायता कर सकता हूँ। कृपया अपना प्रश्न बताएं।"
-    }.get(language, "Sure, I can help you. Please tell me your question.")
+        "hindi": "ज़रूर, मैं आपकी सहायता कर सकता हूँ। कृपया अपना प्रश्न बताएं।",
+        "kannada": "ಖಚಿತವಾಗಿ, ನಾನು ನಿಮಗೆ ಸಹಾಯ ಮಾಡಬಹುದು. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಹೇಳಿ."
+    }),
+    (r"\bwho are you\b|\bwhat are you\b", {
+        "english": "I'm your friendly Agri chatbot, here to help with crop prices and queries.",
+        "hindi": "मैं आपका एग्री चैटबॉट हूँ, जो फसल के दाम और सवालों में मदद करता है।",
+        "kannada": "ನಾನು ನಿಮ್ಮ ಕೃಷಿ ಚಾಟ್‌ಬಾಟ್, ಬೆಲೆ ಮತ್ತು ಪ್ರಶ್ನೆಗಳಿಗೆ ಸಹಾಯ ಮಾಡಲು ಇಲ್ಲಿದ್ದೇನೆ."
+    }),
+    (r"\bwhat can you do\b|\byour features\b", {
+        "english": "I can provide crop prices, answer basic questions, and assist you in English, Hindi, and Kannada.",
+        "hindi": "मैं फसल के दाम, सामान्य सवालों के जवाब और हिंदी, अंग्रेज़ी, कन्नड़ में सहायता कर सकता हूँ।",
+        "kannada": "ನಾನು ಬೆಲೆ ಮಾಹಿತಿ, ಸಾಮಾನ್ಯ ಪ್ರಶ್ನೆಗಳಿಗೆ ಉತ್ತರ, ಮತ್ತು ಕನ್ನಡ, ಇಂಗ್ಲಿಷ್, ಹಿಂದಿಯಲ್ಲಿ ಸಹಾಯ ಮಾಡಬಹುದು."
+    }),
+    (r"\bare you a robot\b|\bare you human\b", {
+        "english": "I'm a virtual assistant, not a human, but I'm here to help!",
+        "hindi": "मैं एक वर्चुअल असिस्टेंट हूँ, इंसान नहीं, लेकिन आपकी मदद के लिए हूँ!",
+        "kannada": "ನಾನು ವರ್ಚುವಲ್ ಸಹಾಯಕ, ಮಾನವ ಅಲ್ಲ, ಆದರೆ ಸಹಾಯ ಮಾಡಲು ಇಲ್ಲಿದ್ದೇನೆ!"
+    }),
+    (r"\bhello\b|\bhi\b|\bhey\b", {
+        "english": "Hello! How can I assist you today?",
+        "hindi": "नमस्ते! मैं आपकी किस प्रकार सहायता कर सकता हूँ?",
+        "kannada": "ಹಲೋ! ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?"
+    }),
+    # Add more patterns as needed!
+]
+
+def get_basic_reply(user_message, language):
+    msg = user_message.lower()
+    for pattern, responses in BASIC_PATTERNS_RESPONSES:
+        if re.search(pattern, msg):
+            return responses.get(language, responses["english"])
+    return None
 
 def get_default_reply(language):
     return {
@@ -145,26 +211,15 @@ def get_default_reply(language):
         "hindi": "माफ़ कीजिए, मैं समझ नहीं पाया। कृपया दोबारा कहें।"
     }.get(language, "Sorry, I didn't understand that. Could you please rephrase?")
 
-# 5. Main Bot Logic
 def get_bot_reply(user_message, language):
-    # 1. Price queries
     price_reply = get_price_reply(user_message, language)
     if price_reply:
         return price_reply
-    # 2. Greetings
-    if re.search(r'\bhello\b|\bhi\b|\bhey\b', user_message.lower()) or \
-       (language == "kannada" and re.search(r'ಹಲೋ|ನಮಸ್ಕಾರ', user_message)) or \
-       (language == "hindi" and re.search(r'नमस्ते|हैलो', user_message)):
-        return get_greeting_reply(language)
-    # 3. Help
-    if re.search(r'\bhelp\b|\bassistance\b', user_message.lower()) or \
-       (language == "kannada" and re.search(r'ಸಹಾಯ', user_message)) or \
-       (language == "hindi" and re.search(r'मदद|सहायता', user_message)):
-        return get_help_reply(language)
-    # 4. Default fallback
+    basic_reply = get_basic_reply(user_message, language)
+    if basic_reply:
+        return basic_reply
     return get_default_reply(language)
 
-# 6. Flask Endpoint
 @app.route('/api/message', methods=['POST'])
 def handle_message():
     data = request.json
@@ -172,6 +227,19 @@ def handle_message():
     language = data.get('language', 'english')
     response = {"reply": get_bot_reply(user_message, language)}
     return jsonify(response)
+
+@app.route('/api/predict', methods=['POST'])
+def predict_price():
+    data = request.json
+    try:
+        features = []
+        for col in ['crop', 'state', 'market', 'date']:
+            features.append(data.get(col))
+        features = np.array([features]).astype(float)
+        prediction = model.predict(features)
+        return jsonify({'predicted_price': float(prediction[0])})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 if __name__ == '__main__':
     app.run(debug=True)
